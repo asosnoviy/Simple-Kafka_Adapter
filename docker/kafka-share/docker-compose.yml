@@ -25,3 +25,22 @@ services:
       KAFKA_NUM_PARTITIONS: 1
       # Shorter record lock than the 30 s default, to keep the lock-expiry test (AC-9) fast
       KAFKA_GROUP_SHARE_RECORD_LOCK_DURATION_MS: 15000
+
+  # Web UI for the bench: topics, messages, consumer groups.
+  # Port 8081 on the host, because 8080 is already taken by another service.
+  akhq:
+    image: tchiotludo/akhq:latest
+    container_name: akhq
+    ports:
+      - "8080:8080"
+    environment:
+      # The configuration is passed inline, the way the official example does.
+      # The broker is reached by the compose service name.
+      AKHQ_CONFIGURATION: |
+        akhq:
+          connections:
+            kafka-share:
+              properties:
+                bootstrap.servers: "kafka:9092"
+    depends_on:
+      - kafka
