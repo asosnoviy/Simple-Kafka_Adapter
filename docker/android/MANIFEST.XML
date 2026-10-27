@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<bundle xmlns="http://v8.1c.ru/8.2/addin/bundle" name="simpleKafka1C">
+<component os="Android" path="libSimpleKafka1C_ARM64.so" type="native" arch="ARM64" codeType="c++" />
+<component os="Android" path="libSimpleKafka1C_ARM.so" type="native" arch="ARM" codeType="c++" />
+</bundle>

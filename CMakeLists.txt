@@ -49,6 +49,18 @@ set(SOURCE_FILES
     src/protobuf_methods.cpp
 )
 
+# The 1C mobile platform loads an add-in library with dlopen and then calls
+# the JNI_OnLoad entry point it resolves with dlsym, without checking the
+# result for NULL. A library without that export terminates the application
+# with SIGSEGV, so the entry point has to be part of the library. jni.h is
+# provided by the Android NDK.
+if (CMAKE_SYSTEM_NAME STREQUAL "Android")
+    list(APPEND SOURCE_FILES
+        src/jnienv.cpp
+        src/jnienv.h
+    )
+endif()
+
 add_library(${TARGET} SHARED ${SOURCE_FILES})
 
 # -----------------------------

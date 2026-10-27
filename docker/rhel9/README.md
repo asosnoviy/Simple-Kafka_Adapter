@@ -10,7 +10,7 @@
   `ldd`, список требуемых версий символов glibc и список экспортируемых символов.
 
 Статически внутрь `.so` линкуются: librdkafka, OpenSSL, curl, protobuf, abseil,
-utf8-range, boost (json, container, property-tree), avro-cpp, fmt, zlib, zstd,
+utf8-range, boost (json, container, algorithm, property-tree), avro-cpp, fmt, zlib, zstd,
 lz4, snappy, cyrus-sasl, krb5, libuuid, а также `libstdc++`.
 
 Внешние зависимости результата:

@@ -1,0 +1,88 @@
+Build-time only diagnostics patch, applied inside the container to the copied
+sources. It is applied on top of 0001-android-core-build.patch and only when
+the build is started with --build-arg DIAGNOSTICS=ON.
+
+The patch reports the lifecycle of the component to logcat under the tag SK1C:
+
+    SK1C  Init_connection=0x... module_base=0x...
+    SK1C  setMemManager_memory_manager=0x... module_base=0x...
+    SK1C  first_allocation_memory_manager=0x... module_base=0x...
+
+It answers one question: does the 1C mobile platform call setMemManager, i.e.
+does it provide a memory manager for the buffers the component hands over? The
+pointer that belongs to the component library itself (it is inside the range of
+module_base) is the fallback of the component, any other pointer belongs to the
+platform.
+
+The patch links liblog, so the diagnostic build has one shared library more
+than the regular one.
+
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -271,3 +271,6 @@
+     message(STATUS "ANDROID_ABI: ${ANDROID_ABI}")
+     message(STATUS "ANDROID_PLATFORM: ${ANDROID_PLATFORM}")
+ endif()
++
++# Diagnostics build: the lifecycle log goes to logcat through liblog.
++target_link_libraries(${TARGET} PRIVATE log)
+--- a/src/Component.cpp
++++ b/src/Component.cpp
+@@ -25,6 +25,29 @@
+ 
+ #include "Component.h"
+ 
++#ifdef __ANDROID__
++#include <android/log.h>
++#include <dlfcn.h>
++
++// Diagnostics build: report the lifecycle of the component to logcat, tag SK1C.
++static const void *sk1c_module_base() {
++    Dl_info info{};
++    if (dladdr(reinterpret_cast<void *>(&sk1c_module_base), &info) != 0) {
++        return info.dli_fbase;
++    }
++    return nullptr;
++}
++
++static void sk1c_log_ptr(const char *what, const void *p) {
++    __android_log_print(ANDROID_LOG_INFO, "SK1C", "%s=%p module_base=%p", what, p,
++                        sk1c_module_base());
++}
++
++#define SK1C_LOG_PTR(what, ptr) sk1c_log_ptr((what), (const void *) (ptr))
++#else
++#define SK1C_LOG_PTR(what, ptr) ((void) 0)
++#endif
++
+ #define BASE_ERRNO     7
+ 
+ #ifdef _WIN32
+@@ -43,11 +66,13 @@
+ 
+ bool Component::Init(void *connection_) {
+     connection = static_cast<IAddInDefBase *>(connection_);
++    SK1C_LOG_PTR("Init_connection", connection);
+     return connection != nullptr;
+ }
+ 
+ bool Component::setMemManager(void *memory_manager_) {
+     memory_manager = static_cast<IMemoryManager *>(memory_manager_);
++    SK1C_LOG_PTR("setMemManager_memory_manager", memory_manager);
+     return memory_manager != nullptr;
+ }
+ 
+@@ -475,6 +500,11 @@
+ }
+ 
+ void Component::storeVariable(const std::u16string &src, WCHAR_T **dst) {
++    static bool logged = false;
++    if (!logged) {
++        logged = true;
++        SK1C_LOG_PTR("first_allocation_memory_manager", memory_manager);
++    }
+ 
+     size_t c_size = (src.size() + 1) * sizeof(char16_t);
+ 

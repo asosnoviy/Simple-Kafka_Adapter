@@ -20,7 +20,7 @@
 
 Так же доступна книга - ["Apache Kafka и 1С. Первые шаги"](https://github.com/NuclearAPK/Simple-Kafka-Start-Book). В ней описаны самые базовые шаги, которые познакомят вас с брокером Kafka и его интеграции с 1С. 
 
-[Сборка](./docs/building.md) | [Сборка через Visual Studio](./docs/visual_studio_build.md) | [Статическая линковка Protobuf](./docs/protobuf_static_linking.md)
+[Сборка](./docs/building.md) | [Сборка через Visual Studio](./docs/visual_studio_build.md) | [Сборка под Android](./docker/android/README.md) | [Статическая линковка Protobuf](./docs/protobuf_static_linking.md)
 
 [Подключение внешней компоненты](./docs/connection.md)
 
@@ -73,3 +73,7 @@
 ✔ Windows 64
 
 ✔ Linux 64 (платформа 8.3.24 и выше)
+
+✔ Android, мобильная платформа (ARM 32 бита, ARM64) — сборка в режиме core,
+без AVRO, Protobuf, Schema Registry, TLS и SASL, транспорт `plaintext`.
+Подробности — в [docker/android/README.md](./docker/android/README.md).

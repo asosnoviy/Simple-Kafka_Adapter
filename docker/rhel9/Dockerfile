@@ -62,7 +62,12 @@ ARG VCPKG_REF=master
 ENV VCPKG_ROOT=/opt/vcpkg \
     VCPKG_DISABLE_METRICS=1
 
-RUN git clone https://github.com/microsoft/vcpkg.git ${VCPKG_ROOT} \
+RUN for attempt in 1 2 3 4 5; do \
+        git clone https://github.com/microsoft/vcpkg.git ${VCPKG_ROOT} \
+        && break \
+        || { echo "vcpkg clone failed (attempt ${attempt}), retrying"; rm -rf ${VCPKG_ROOT}; sleep $((attempt * 10)); }; \
+    done \
+    && test -d ${VCPKG_ROOT}/.git \
     && git -C ${VCPKG_ROOT} checkout ${VCPKG_REF} \
     && git -C ${VCPKG_ROOT} rev-parse HEAD > /opt/vcpkg-commit.txt \
     && ${VCPKG_ROOT}/bootstrap-vcpkg.sh -disableMetrics
@@ -84,6 +89,7 @@ RUN --mount=type=cache,target=/root/.cache/vcpkg \
         utf8-range \
         boost-json \
         boost-container \
+        boost-algorithm \
         boost-property-tree \
         fmt \
         zlib \

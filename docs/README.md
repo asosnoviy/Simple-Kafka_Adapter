@@ -48,6 +48,7 @@
 |--------|----------|
 | [Сборка с vcpkg](building.md) | Установка зависимостей через vcpkg, сборка для Windows и Linux |
 | [Сборка в Visual Studio](visual_studio_build.md) | Открытие CMake проекта, сборка через MSBuild |
+| [Сборка под Android](../docker/android/README.md) | Мобильная платформа «1С:Предприятие»: архив с `MANIFEST.XML`, архитектуры ARM и ARM64 |
 | [Статическая линковка Protobuf](protobuf_static_linking.md) | Настройки CMake для статической линковки зависимостей |
 
 ### Примеры

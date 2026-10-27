@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+<!-- The component talks to Kafka over the network, so the mobile application
+     that hosts it needs the INTERNET permission. -->
+<uses-permission android:name="android.permission.INTERNET" />
+</root>
