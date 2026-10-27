@@ -19,54 +19,33 @@
 библиотекой, а архивом: в архив обязательно входит `MANIFEST.XML`, который
 указывает платформе, какой файл и для какой архитектуры процессора загружать.
 
-Статически внутрь `.so` линкуются: librdkafka, zlib, lz4, Boost.JSON и
-`libc++` (`ANDROID_STL=c++_static`); в уровне `schema` ещё AVRO, Protobuf,
-curl и fmt. Внешние зависимости результата — только системные библиотеки
-Android: `libc`, `libm`, `libdl` и, в уровне `schema`, ещё `liblog.so` —
-её подтягивает Protobuf.
+Статически внутрь `.so` линкуются: librdkafka, zlib, snappy, zstd, OpenSSL,
+AVRO, Protobuf, curl, fmt, Boost.JSON и `libc++` (`ANDROID_STL=c++_static`).
+Внешние зависимости результата — только системные библиотеки Android:
+`libc`, `libm`, `libdl` и ещё `liblog.so` — её подтягивает Protobuf.
 
-## Уровни функциональности сборки
+## Что входит в сборку
 
-Сборка имеет уровень функциональности — набор включённых возможностей:
+Сборка одна и полная — набор возможностей такой же, как на Windows и Linux:
 
-| Уровень | Состав | Когда нужен |
-|---|---|---|
-| `schema` (по умолчанию) | Kafka, AVRO, Protobuf, Schema Registry | обычная сборка под Android |
-| `kafka` | только Kafka | платформа, где схемные зависимости не собираются |
+- **Kafka** — продюсер, консьюмер, очереди (share groups), админ API, ACL,
+  транзакции, push-режим;
+- **AVRO и Protobuf** — методы работы со схемами: `СохранитьСхемуAVRO`,
+  `ПреобразоватьВФорматAVRO`, `ОтправитьСообщениеAVRO`, `СохранитьФайлAVRO`,
+  `ДекодироватьСообщениеAVRO`, `ПолучитьСхемуAVRO`, `СохранитьСхемуProtobuf`,
+  `ПреобразоватьВФорматProtobuf`, `СохранитьФайлProtobuf`,
+  `ДекодироватьСообщениеProtobuf`, `ОтправитьСообщениеProtobuf`,
+  `ОтправитьСообщениеProtobufСОжиданиемРезультата`;
+- **Schema Registry** — `ЗарегистрироватьСхему`, `ПолучитьСхемуПоИД`,
+  `ПолучитьПоследнююСхему`, `ПолучитьВерсииСхемы`, `УдалитьСхему`;
+- **TLS** — OpenSSL статически линкуется в библиотеку, поэтому
+  `security.protocol=ssl` работает, а Schema Registry доступен по `https://`;
+- **SASL** — отдельных библиотек не требуется: SCRAM librdkafka реализует
+  сам, без cyrus-sasl, который под NDK не собирается в принципе;
+  OAUTHBEARER приходит вместе с TLS.
 
-По умолчанию мобильная сборка ведётся в уровне `schema`: порты `avro-cpp`,
-`protobuf` и `curl` под NDK собираются, поэтому работают и методы работы со
-схемами AVRO и Protobuf, и методы Schema Registry. Уровень выбирается
-параметром сборки:
-
-```sh
-FEATURE_LEVEL=kafka OUTPUT=out/android-kafka sh docker/android/build.sh
-```
-
-```powershell
-pwsh docker/android/build.ps1 -FeatureLevel kafka
-```
-
-В уровне `kafka` не регистрируются методы `СохранитьСхемуAVRO`,
-`ПреобразоватьВФорматAVRO`, `ОтправитьСообщениеAVRO`, `СохранитьФайлAVRO`,
-`ДекодироватьСообщениеAVRO`, `ПолучитьСхемуAVRO`, `СохранитьСхемуProtobuf`,
-`ПреобразоватьВФорматProtobuf`, `СохранитьФайлProtobuf`,
-`ДекодироватьСообщениеProtobuf`, `ОтправитьСообщениеProtobuf`,
-`ОтправитьСообщениеProtobufСОжиданиемРезультата`, а также методы Schema
-Registry: `ЗарегистрироватьСхему`, `ПолучитьСхемуПоИД`,
-`ПолучитьПоследнююСхему`, `ПолучитьВерсииСхемы`, `УдалитьСхему`.
-
-Всё остальное — продюсер, консьюмер, очереди (share groups), админ API, ACL,
-транзакции, push-режим — работает как обычно в обоих уровнях.
-
-### Что не входит ни в один уровень
-
-- **TLS и SASL** — в Android нет системного OpenSSL, а cyrus-sasl под NDK не
-  собирается в принципе. Поэтому Schema Registry работает только по `http://`,
-  а транспорт Kafka — только с `security.protocol=plaintext`.
-
-TLS для Schema Registry и SASL для Kafka можно добавить отдельным уровнем
-сборки: OpenSSL под NDK собирается (проверено), но пока это не сделано.
+Единственное, чего в Android нет, — **cyrus-sasl** (GSSAPI): под NDK он не
+собирается. Kerberos и LDAP не поддерживаются, SCRAM и OAUTHBEARER работают.
 
 ## Точка входа JNI_OnLoad — обязательное требование платформы
 
@@ -124,14 +103,15 @@ RUN for p in /patches/*.patch; do patch -p1 -d /src -i "$p"; done
 
 Патч добавляет:
 
-- уровни функциональности в `CMakeLists.txt` — `kafka` и `schema`: состав
-  исходников, зависимости и определения компиляции; в уровне `kafka` из
-  сборки уходят AVRO, Protobuf, Schema Registry и curl;
-- исключение AVRO/Protobuf/Schema Registry из `src/SimpleKafka1C.h` и
-  `src/SimpleKafka1C.cpp` в уровне `kafka` — им нужны сторонние заголовки;
-- исключение OpenSSL и SASL под Android — в системе Android их нет;
-- исправление `currentDateTime()` в `src/utils.cpp` — на libc++ часы высокого
-  разрешения не привязаны к эпохе Unix.
+- исключение блока cyrus-sasl в `CMakeLists.txt` — под Android этого пакета
+  нет, SASL работает на встроенном в librdkafka SCRAM;
+- печать ABI сборки в лог контейнера.
+
+Исправления переносимости, нужные всем платформам, живут в общих исходниках:
+`currentDateTime()` берёт время с системных часов — на libc++ (тулчейн
+Android NDK и macOS) часы высокого разрешения не привязаны к эпохе Unix, и
+POSIX-ветка функции не компилировалась; `getpid()` подключён явно, через
+`<unistd.h>`.
 
 Подключение `src/jnienv.cpp` к сборке лежит в главном `CMakeLists.txt`: файл
 подключается только когда целевая система — Android, потому что `jni.h` есть
@@ -145,12 +125,10 @@ RUN for p in /patches/*.patch; do patch -p1 -d /src -i "$p"; done
 git apply docker/android/patches/0001-android-build.patch
 #    ... правки ...
 # 2. снять разницу с закоммиченным состоянием — это и есть новый патч
-git diff -- CMakeLists.txt src/SimpleKafka1C.h \
-    src/SimpleKafka1C.cpp src/utils.cpp \
+git diff -- CMakeLists.txt \
     > docker/android/patches/0001-android-build.patch
 # 3. вернуть дерево к закоммиченному состоянию
-git checkout -- CMakeLists.txt src/SimpleKafka1C.h \
-    src/SimpleKafka1C.cpp src/utils.cpp
+git checkout -- CMakeLists.txt
 ```
 
 Проверить, что патч применится к текущему состоянию исходников:
@@ -193,7 +171,7 @@ docker build -f docker/android/Dockerfile --target export --output out/android .
 | `VCPKG_REF` | `master` | Коммит или тег vcpkg — фиксирует версии зависимостей |
 | `BUILD_TYPE` | `Release` | Тип сборки CMake |
 | `API_LEVEL` | `21` | Уровень API Android (21 = Android 5.0) |
-| `FEATURE_LEVEL` | `schema` | Уровень функциональности: `schema` или `kafka` |
+
 | `DIAGNOSTICS` | `OFF` | Диагностическая сборка с логированием в logcat (тег `SK1C`) |
 
 Пример фиксации версий зависимостей:
@@ -204,26 +182,22 @@ VCPKG_REF=2025.06.13 sh docker/android/build.sh
 
 ### Пакеты vcpkg
 
-Набор зависимостей для мобильной сборки — одинаков для обоих уровней:
+Набор зависимостей для мобильной сборки:
 
 | Пакет | Зачем |
 |---|---|
-| `librdkafka[zlib]` | Kafka-клиент; без `ssl` и `sasl` — на Android нет ни OpenSSL, ни cyrus-sasl |
+| `librdkafka[ssl,curl,zlib,zstd]` | Kafka-клиент с шифрованным транспортом |
+| `openssl` | TLS: в Android нет системного OpenSSL, библиотека приходит из vcpkg |
 | `boost-json` | JSON-форматирование отправляемых и принимаемых сообщений |
 | `boost-algorithm` | `Boost.Algorithm`: `split`, `replace`, `trim`, `classification` |
 | `boost-property-tree` | `Boost.PropertyTree`: чтение JSON |
-| `zlib` | кодек сжатия для librdkafka |
-
-Уровень `schema` добавляет к ним:
-
-| Пакет | Зачем |
-|---|---|
-| `avro-cpp[core]` | сериализация AVRO |
-| `protobuf` | разбор Protobuf в runtime, без `protoc` |
-| `curl[core]` | Schema Registry по HTTP |
-| `fmt` | форматирование ошибок в avro-cpp |
 | `boost-container` | `Boost.Container` — нужен схемным исходникам |
+| `zlib`, `snappy`, `zstd` | кодек сжатия для librdkafka и для сообщений |
+| `avro-cpp[core,snappy]` | сериализация AVRO, включая кодек snappy |
+| `protobuf` | разбор Protobuf в runtime, без `protoc` |
 | `abseil`, `utf8-range` | зависимости Protobuf, на них ссылается его CMake-конфигурация |
+| `curl[core,ssl]` | Schema Registry по HTTP и https |
+| `fmt` | форматирование ошибок в avro-cpp |
 
 vcpkg разбил Boost на отдельные порты по одной библиотеке на порт, поэтому
 header-only библиотеки (`boost-algorithm`, `boost-property-tree`) нужно
@@ -236,8 +210,9 @@ header-only библиотеки (`boost-algorithm`, `boost-property-tree`) ну
 vcpkg install --triplet arm64-android21 \
     --overlay-ports=vcpkg-overlay \
     --overlay-triplets=vcpkg-overlay/triplets \
-    "librdkafka[zlib]" boost-json boost-algorithm boost-property-tree zlib \
-    fmt boost-container avro-cpp[core] protobuf abseil utf8-range curl[core]
+    "librdkafka[ssl,curl,zlib,zstd]" openssl boost-json boost-algorithm \
+    boost-property-tree boost-container zlib snappy zstd \
+    avro-cpp[core,snappy] protobuf abseil utf8-range curl[core,ssl] fmt
 ```
 
 ## Архитектуры и уровень API
@@ -322,7 +297,7 @@ unzip -l SimpleKafka1C-android.zip                    # состав архив�
 их требует мобильная платформа (см. раздел про `JNI_OnLoad` выше). Остальные
 символы скрыты, как и требует мобильная платформа.
 
-В уровне `schema` в списке экспортов остаются ещё два служебных символа
+В списке экспортов остаются ещё два служебных символа
 Protobuf — `__start_pb_defaults` и `__stop_pb_defaults`. Это границы секции
 Protobuf в готовой библиотеке: их создаёт линкер, и версионным скриптом они
 не скрываются. На работу компоненты они не влияют.
@@ -332,7 +307,7 @@ Protobuf в готовой библиотеке: их создаёт линке�
 В репозитории есть харнесс подключения для Android — `tests/android-harness`.
 Он повторяет последовательность вызовов мобильной платформы (`Init`,
 `setMemManager`, `RegisterExtensionAs`, свойства, методы) и дополнительно
-проверяет уровень `schema`: вызывает AVRO, Protobuf и Schema Registry так же,
+проверяет схемные методы: вызывает AVRO, Protobuf и Schema Registry так же,
 как это делает 1С, и показывает результат.
 
 Сборка харнесса (нужен Android NDK):
@@ -377,6 +352,26 @@ docker run -d --name schema-registry -p 8082:8081 \
 
 Адрес `192.168.41.202` — адрес хоста в локальной сети: он же указан в
 `advertised.listeners` брокера в `docker/kafka-share/docker-compose.yml`.
+
+### Проверка TLS
+
+Четвёртым аргументом харнессу передаётся путь к сертификату CA на
+устройстве, пятым — адрес брокера с TLS-листенером. Сертификат передаётся
+компоненте содержимым, а не файлом, поэтому на устройстве ничего
+записывать не нужно:
+
+```sh
+adb push docker/kafka-share/certs/ca.pem /data/local/tmp/
+adb shell /data/local/tmp/connect_harness /data/local/tmp/libSimpleKafka1C_ARM64.so \
+    http://192.168.41.202:8082 /data/local/tmp/ca.pem 192.168.41.202:9094
+```
+
+Ожидаемый вывод — `InitProducer : result=1` и `Produce : value=0`: продюсер
+поднялся по TLS и сообщение ушло в топик `test-topic-tls`.
+
+Брокер с TLS-листенером поднимается вместе со стендом: порт 9094
+(`docker/kafka-share/docker-compose.yml`), сертификаты для него генерируются
+скриптом `docker/kafka-share/gen-certs.sh`.
 
 ## Диагностическая сборка
 

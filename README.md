@@ -74,6 +74,6 @@
 
 ✔ Linux 64 (платформа 8.3.24 и выше)
 
-✔ Android, мобильная платформа (ARM 32 бита, ARM64) — сборка в режиме core,
-без AVRO, Protobuf, Schema Registry, TLS и SASL, транспорт `plaintext`.
+✔ Android, мобильная платформа (ARM 32 бита, ARM64):
+Kafka, AVRO, Protobuf и Schema Registry, шифрованный транспорт TLS и SASL.
 Подробности — в [docker/android/README.md](./docker/android/README.md).
