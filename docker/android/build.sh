@@ -8,6 +8,12 @@
 # Diagnostics build: logs the lifecycle of the component to logcat, tag SK1C.
 #
 #   DIAGNOSTICS=ON OUTPUT=out/android-diag sh docker/android/build.sh
+#
+# Feature level of the build:
+#   schema - AVRO, Protobuf and Schema Registry over HTTP (default)
+#   kafka  - Kafka only, for a platform where the schema dependencies do not build
+#
+#   FEATURE_LEVEL=kafka OUTPUT=out/android-kafka sh docker/android/build.sh
 
 set -eu
 
@@ -17,6 +23,7 @@ VCPKG_REF="${VCPKG_REF:-master}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
 API_LEVEL="${API_LEVEL:-21}"
 DIAGNOSTICS="${DIAGNOSTICS:-OFF}"
+FEATURE_LEVEL="${FEATURE_LEVEL:-schema}"
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$repo_root"
@@ -30,6 +37,7 @@ docker build \
     --build-arg "BUILD_TYPE=$BUILD_TYPE" \
     --build-arg "API_LEVEL=$API_LEVEL" \
     --build-arg "DIAGNOSTICS=$DIAGNOSTICS" \
+    --build-arg "FEATURE_LEVEL=$FEATURE_LEVEL" \
     .
 
 echo

@@ -20,26 +20,34 @@
 указывает платформе, какой файл и для какой архитектуры процессора загружать.
 
 Статически внутрь `.so` линкуются: librdkafka, zlib, lz4, Boost.JSON и
-`libc++` (`ANDROID_STL=c++_static`). Внешние зависимости результата — только
-системные библиотеки Android.
+`libc++` (`ANDROID_STL=c++_static`); в уровне `schema` ещё AVRO, Protobuf,
+curl и fmt. Внешние зависимости результата — только системные библиотеки
+Android: `libc`, `libm`, `libdl` и, в уровне `schema`, ещё `liblog.so` —
+её подтягивает Protobuf.
 
-## Ограничения мобильной сборки
+## Уровни функциональности сборки
 
-Мобильная сборка ведётся в режиме **core** — без AVRO, Protobuf, Schema
-Registry, TLS и SASL. Причины:
+Сборка имеет уровень функциональности — набор включённых возможностей:
 
-- **AVRO** — avro-cpp отсутствует в vcpkg и собирается вручную даже под Linux;
-- **Protobuf** — тяжёлый порт, под NDK собирается долго и нестабильно;
-- **Schema Registry** — работает поверх HTTP-клиента curl, который под NDK
-  собирается отдельно;
-- **TLS и SASL** — в Android нет системного OpenSSL, а cyrus-sasl под NDK не
-  собирается в принципе.
+| Уровень | Состав | Когда нужен |
+|---|---|---|
+| `schema` (по умолчанию) | Kafka, AVRO, Protobuf, Schema Registry | обычная сборка под Android |
+| `kafka` | только Kafka | платформа, где схемные зависимости не собираются |
 
-Поэтому на Android компонента работает только с незащищённым транспортом
-(`security.protocol=plaintext`). Всё остальное — продюсер, консьюмер, очереди
-(share groups), админ API, ACL, транзакции, push-режим — работает как обычно.
+По умолчанию мобильная сборка ведётся в уровне `schema`: порты `avro-cpp`,
+`protobuf` и `curl` под NDK собираются, поэтому работают и методы работы со
+схемами AVRO и Protobuf, и методы Schema Registry. Уровень выбирается
+параметром сборки:
 
-В core-сборке не регистрируются методы `СохранитьСхемуAVRO`,
+```sh
+FEATURE_LEVEL=kafka OUTPUT=out/android-kafka sh docker/android/build.sh
+```
+
+```powershell
+pwsh docker/android/build.ps1 -FeatureLevel kafka
+```
+
+В уровне `kafka` не регистрируются методы `СохранитьСхемуAVRO`,
 `ПреобразоватьВФорматAVRO`, `ОтправитьСообщениеAVRO`, `СохранитьФайлAVRO`,
 `ДекодироватьСообщениеAVRO`, `ПолучитьСхемуAVRO`, `СохранитьСхемуProtobuf`,
 `ПреобразоватьВФорматProtobuf`, `СохранитьФайлProtobuf`,
@@ -48,9 +56,17 @@ Registry, TLS и SASL. Причины:
 Registry: `ЗарегистрироватьСхему`, `ПолучитьСхемуПоИД`,
 `ПолучитьПоследнююСхему`, `ПолучитьВерсииСхемы`, `УдалитьСхему`.
 
-Режим core включается автоматически при целевой сборке под Android
-(`CMAKE_SYSTEM_NAME=Android`). Для других платформ его можно включить принудительно
-ключом `-DSIMPLEKAFKA_CORE=ON`.
+Всё остальное — продюсер, консьюмер, очереди (share groups), админ API, ACL,
+транзакции, push-режим — работает как обычно в обоих уровнях.
+
+### Что не входит ни в один уровень
+
+- **TLS и SASL** — в Android нет системного OpenSSL, а cyrus-sasl под NDK не
+  собирается в принципе. Поэтому Schema Registry работает только по `http://`,
+  а транспорт Kafka — только с `security.protocol=plaintext`.
+
+TLS для Schema Registry и SASL для Kafka можно добавить отдельным уровнем
+сборки: OpenSSL под NDK собирается (проверено), но пока это не сделано.
 
 ## Точка входа JNI_OnLoad — обязательное требование платформы
 
@@ -71,7 +87,7 @@ Registry: `ЗарегистрироватьСхему`, `ПолучитьСхе�
 платформе необходим.
 
 Подключение `src/jnienv.cpp` к сборке — часть build-time патча
-`docker/android/patches/0001-android-core-build.patch` (см. раздел
+`docker/android/patches/0001-android-build.patch` (см. раздел
 «Исходники проекта не меняются» ниже).
 
 В журнале Android этот сбой узнаётся так:
@@ -95,7 +111,7 @@ grep JNI_OnLoad out/android/build-info.txt
 
 Android-сборка не трогает исходники проекта. Все изменения, которые нужны под
 Android, оформлены одним build-time патчем
-`docker/android/patches/0001-android-core-build.patch` и применяются к копии
+`docker/android/patches/0001-android-build.patch` и применяются к копии
 исходников внутри контейнера сборки:
 
 ```dockerfile
@@ -108,11 +124,12 @@ RUN for p in /patches/*.patch; do patch -p1 -d /src -i "$p"; done
 
 Патч добавляет:
 
-- режим **core** в `CMakeLists.txt` — состав исходников, зависимости и
-  определения компиляции для сборки без AVRO, Protobuf, Schema Registry, curl,
-  OpenSSL и SASL;
+- уровни функциональности в `CMakeLists.txt` — `kafka` и `schema`: состав
+  исходников, зависимости и определения компиляции; в уровне `kafka` из
+  сборки уходят AVRO, Protobuf, Schema Registry и curl;
 - исключение AVRO/Protobuf/Schema Registry из `src/SimpleKafka1C.h` и
-  `src/SimpleKafka1C.cpp` — им нужны сторонние заголовки, которых под NDK нет;
+  `src/SimpleKafka1C.cpp` в уровне `kafka` — им нужны сторонние заголовки;
+- исключение OpenSSL и SASL под Android — в системе Android их нет;
 - исправление `currentDateTime()` в `src/utils.cpp` — на libc++ часы высокого
   разрешения не привязаны к эпохе Unix.
 
@@ -125,12 +142,12 @@ RUN for p in /patches/*.patch; do patch -p1 -d /src -i "$p"; done
 
 ```sh
 # 1. применить текущий патч и поправить Android-специфичные изменения
-git apply docker/android/patches/0001-android-core-build.patch
+git apply docker/android/patches/0001-android-build.patch
 #    ... правки ...
 # 2. снять разницу с закоммиченным состоянием — это и есть новый патч
 git diff -- CMakeLists.txt src/SimpleKafka1C.h \
     src/SimpleKafka1C.cpp src/utils.cpp \
-    > docker/android/patches/0001-android-core-build.patch
+    > docker/android/patches/0001-android-build.patch
 # 3. вернуть дерево к закоммиченному состоянию
 git checkout -- CMakeLists.txt src/SimpleKafka1C.h \
     src/SimpleKafka1C.cpp src/utils.cpp
@@ -139,7 +156,7 @@ git checkout -- CMakeLists.txt src/SimpleKafka1C.h \
 Проверить, что патч применится к текущему состоянию исходников:
 
 ```sh
-git apply --check docker/android/patches/0001-android-core-build.patch
+git apply --check docker/android/patches/0001-android-build.patch
 ```
 
 ## Запуск
@@ -176,6 +193,8 @@ docker build -f docker/android/Dockerfile --target export --output out/android .
 | `VCPKG_REF` | `master` | Коммит или тег vcpkg — фиксирует версии зависимостей |
 | `BUILD_TYPE` | `Release` | Тип сборки CMake |
 | `API_LEVEL` | `21` | Уровень API Android (21 = Android 5.0) |
+| `FEATURE_LEVEL` | `schema` | Уровень функциональности: `schema` или `kafka` |
+| `DIAGNOSTICS` | `OFF` | Диагностическая сборка с логированием в logcat (тег `SK1C`) |
 
 Пример фиксации версий зависимостей:
 
@@ -185,7 +204,7 @@ VCPKG_REF=2025.06.13 sh docker/android/build.sh
 
 ### Пакеты vcpkg
 
-Набор зависимостей для мобильной сборки:
+Набор зависимостей для мобильной сборки — одинаков для обоих уровней:
 
 | Пакет | Зачем |
 |---|---|
@@ -194,6 +213,17 @@ VCPKG_REF=2025.06.13 sh docker/android/build.sh
 | `boost-algorithm` | `Boost.Algorithm`: `split`, `replace`, `trim`, `classification` |
 | `boost-property-tree` | `Boost.PropertyTree`: чтение JSON |
 | `zlib` | кодек сжатия для librdkafka |
+
+Уровень `schema` добавляет к ним:
+
+| Пакет | Зачем |
+|---|---|
+| `avro-cpp[core]` | сериализация AVRO |
+| `protobuf` | разбор Protobuf в runtime, без `protoc` |
+| `curl[core]` | Schema Registry по HTTP |
+| `fmt` | форматирование ошибок в avro-cpp |
+| `boost-container` | `Boost.Container` — нужен схемным исходникам |
+| `abseil`, `utf8-range` | зависимости Protobuf, на них ссылается его CMake-конфигурация |
 
 vcpkg разбил Boost на отдельные порты по одной библиотеке на порт, поэтому
 header-only библиотеки (`boost-algorithm`, `boost-property-tree`) нужно
@@ -206,7 +236,8 @@ header-only библиотеки (`boost-algorithm`, `boost-property-tree`) ну
 vcpkg install --triplet arm64-android21 \
     --overlay-ports=vcpkg-overlay \
     --overlay-triplets=vcpkg-overlay/triplets \
-    "librdkafka[zlib]" boost-json boost-algorithm boost-property-tree zlib
+    "librdkafka[zlib]" boost-json boost-algorithm boost-property-tree zlib \
+    fmt boost-container avro-cpp[core] protobuf abseil utf8-range curl[core]
 ```
 
 ## Архитектуры и уровень API
@@ -290,6 +321,62 @@ unzip -l SimpleKafka1C-android.zip                    # состав архив�
 и `GetAttachType`, а в Android-сборке ещё и `JNI_OnLoad` с `JNI_OnUnload` —
 их требует мобильная платформа (см. раздел про `JNI_OnLoad` выше). Остальные
 символы скрыты, как и требует мобильная платформа.
+
+В уровне `schema` в списке экспортов остаются ещё два служебных символа
+Protobuf — `__start_pb_defaults` и `__stop_pb_defaults`. Это границы секции
+Protobuf в готовой библиотеке: их создаёт линкер, и версионным скриптом они
+не скрываются. На работу компоненты они не влияют.
+
+## Проверка на устройстве
+
+В репозитории есть харнесс подключения для Android — `tests/android-harness`.
+Он повторяет последовательность вызовов мобильной платформы (`Init`,
+`setMemManager`, `RegisterExtensionAs`, свойства, методы) и дополнительно
+проверяет уровень `schema`: вызывает AVRO, Protobuf и Schema Registry так же,
+как это делает 1С, и показывает результат.
+
+Сборка харнесса (нужен Android NDK):
+
+```sh
+cmake -S tests/android-harness -B out/build/android-harness -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+    -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-21 \
+    -DANDROID_NATIVE_API_LEVEL=21 -DANDROID_STL=c++_static
+cmake --build out/build/android-harness
+```
+
+Запуск на устройстве:
+
+```sh
+adb push out/build/android-harness/connect_harness /data/local/tmp/
+adb push out/android/libSimpleKafka1C_ARM64.so /data/local/tmp/
+adb shell chmod 755 /data/local/tmp/connect_harness
+adb shell /data/local/tmp/connect_harness /data/local/tmp/libSimpleKafka1C_ARM64.so
+```
+
+Ожидаемый вывод — `connect sequence completed` и по одному успешному вызову
+каждого метода схем. Вторым аргументом передаётся адрес Schema Registry:
+тогда харнесс ещё и зарегистрирует схему.
+
+```sh
+adb shell /data/local/tmp/connect_harness /data/local/tmp/libSimpleKafka1C_ARM64.so \
+    http://192.168.41.202:8082
+```
+
+Проверка Schema Registry на устройстве требует доступного с телефона
+реестра. Поднять его можно так:
+
+```sh
+docker run -d --name schema-registry -p 8082:8081 \
+    -e SCHEMA_REGISTRY_HOST_NAME=schema-registry \
+    -e SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS=PLAINTEXT://192.168.41.202:9092 \
+    -e SCHEMA_REGISTRY_LISTENERS=http://0.0.0.0:8081 \
+    confluentinc/cp-schema-registry:8.2.0
+```
+
+Адрес `192.168.41.202` — адрес хоста в локальной сети: он же указан в
+`advertised.listeners` брокера в `docker/kafka-share/docker-compose.yml`.
 
 ## Диагностическая сборка
 

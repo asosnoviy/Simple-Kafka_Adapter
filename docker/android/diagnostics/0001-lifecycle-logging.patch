@@ -1,5 +1,5 @@
 Build-time only diagnostics patch, applied inside the container to the copied
-sources. It is applied on top of 0001-android-core-build.patch and only when
+sources. It is applied on top of 0001-android-build.patch and only when
 the build is started with --build-arg DIAGNOSTICS=ON.
 
 The patch reports the lifecycle of the component to logcat under the tag SK1C:

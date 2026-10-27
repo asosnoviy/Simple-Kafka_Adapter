@@ -7,6 +7,12 @@
 # Diagnostics build: logs the lifecycle of the component to logcat, tag SK1C.
 #
 #   pwsh docker/android/build.ps1 -Diagnostics On -Output out/android-diag
+#
+# Feature level of the build:
+#   schema - AVRO, Protobuf and Schema Registry over HTTP (default)
+#   kafka  - Kafka only, for a platform where the schema dependencies do not build
+#
+#   pwsh docker/android/build.ps1 -FeatureLevel kafka -Output out/android-kafka
 
 [CmdletBinding()]
 param(
@@ -16,7 +22,9 @@ param(
     [string]$BuildType = "Release",
     [int]$ApiLevel = 21,
     [ValidateSet("On", "Off")]
-    [string]$Diagnostics = "Off"
+    [string]$Diagnostics = "Off",
+    [ValidateSet("kafka", "schema")]
+    [string]$FeatureLevel = "schema"
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,6 +41,7 @@ try {
         --build-arg BUILD_TYPE=$BuildType `
         --build-arg API_LEVEL=$ApiLevel `
         --build-arg DIAGNOSTICS=$Diagnostics `
+        --build-arg FEATURE_LEVEL=$FeatureLevel `
         .
     if ($LASTEXITCODE -ne 0) { throw "docker build failed with exit code $LASTEXITCODE" }
 

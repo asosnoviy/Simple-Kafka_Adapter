@@ -10,15 +10,20 @@
 #     libSimpleKafka1C_ARM64.so          - arm64-v8a
 #     libSimpleKafka1C_ARM.so            - armeabi-v7a
 #
-# The component is built in the "core" configuration: Kafka only, without AVRO,
-# Protobuf, Schema Registry, TLS and SASL. Those dependencies are not
-# buildable under the NDK, and the mobile platform has no OpenSSL and no
-# cyrus-sasl. The transport is therefore PLAINTEXT only.
+# The build has a feature level:
+#   kafka  - Kafka only. It needs nothing but librdkafka and Boost.JSON and is
+#            the fallback for a platform where the schema dependencies do not
+#            build.
+#   schema - plus AVRO, Protobuf and Schema Registry. The Schema Registry is
+#            reached over plain HTTP: the build has no TLS runtime.
+# TLS and SASL are not part of either level: the mobile platform has no
+# OpenSSL and no cyrus-sasl, so the transport is PLAINTEXT only.
 #
 # All third-party dependencies (librdkafka, zlib, lz4, Boost.JSON,
-# Boost.Algorithm, Boost.PropertyTree) are built from source by vcpkg as static
-# libraries and linked into the .so, so the component has no dependencies
-# besides the Android runtime itself.
+# Boost.Algorithm, Boost.PropertyTree and, in the "schema" level, AVRO,
+# Protobuf, curl and fmt) are built from source by vcpkg as static libraries
+# and linked into the .so, so the component has no dependencies besides the
+# Android runtime itself.
 
 ARG BASE_IMAGE=ubuntu:22.04
 
@@ -76,7 +81,7 @@ COPY vcpkg-overlay /overlay/vcpkg-overlay
 ARG TRIPLET_ARM64=arm64-android21
 ARG TRIPLET_ARM=arm-neon-android21
 
-# Core dependency set for the mobile platform:
+# Dependency set for the mobile platform:
 #   librdkafka[zlib]     - Kafka client, no TLS (no OpenSSL on Android), no SASL
 #   boost-json           - JSON formatting of produced and consumed messages
 #   boost-algorithm      - Boost.Algorithm string helpers
@@ -87,26 +92,34 @@ ARG TRIPLET_ARM=arm-neon-android21
 # the component uses have to be requested explicitly: they are not pulled in by
 # boost-json.
 #
+# The "schema" feature level adds:
+#   avro-cpp             - AVRO serialization
+#   protobuf             - Protobuf runtime parsing, no protoc needed
+#   curl                 - Schema Registry over HTTP
+#   fmt                  - AVRO error formatting
+#   boost-container      - Boost.Container, needed by the schema sources
+#   abseil, utf8-range   - dependencies of protobuf, referenced by its config
+#
 # Cache mounts keep vcpkg's binary cache and downloads between builds on the
 # same host, so a rebuild does not recompile every dependency from scratch.
+ARG FEATURE_LEVEL=schema
 RUN --mount=type=cache,target=/root/.cache/vcpkg \
     --mount=type=cache,target=/opt/vcpkg/downloads \
-    ${VCPKG_ROOT}/vcpkg install --triplet ${TRIPLET_ARM64} --clean-after-build \
-        --overlay-ports=/overlay/vcpkg-overlay \
-        --overlay-triplets=/overlay/vcpkg-overlay/triplets \
-        "librdkafka[zlib]" \
-        "boost-json" \
-        "boost-algorithm" \
-        "boost-property-tree" \
-        "zlib" \
-    && ${VCPKG_ROOT}/vcpkg install --triplet ${TRIPLET_ARM} --clean-after-build \
-        --overlay-ports=/overlay/vcpkg-overlay \
-        --overlay-triplets=/overlay/vcpkg-overlay/triplets \
-        "librdkafka[zlib]" \
-        "boost-json" \
-        "boost-algorithm" \
-        "boost-property-tree" \
-        "zlib"
+    set -eux; \
+    case "${FEATURE_LEVEL}" in \
+        kafka|schema) ;; \
+        *) echo "FEATURE_LEVEL must be kafka or schema" >&2; exit 1 ;; \
+    esac; \
+    PKGS="librdkafka[zlib] boost-json boost-algorithm boost-property-tree zlib"; \
+    if [ "${FEATURE_LEVEL}" = "schema" ]; then \
+        PKGS="${PKGS} fmt boost-container avro-cpp[core] protobuf abseil utf8-range curl[core]"; \
+    fi; \
+    for triplet in ${TRIPLET_ARM64} ${TRIPLET_ARM}; do \
+        ${VCPKG_ROOT}/vcpkg install --triplet ${triplet} --clean-after-build \
+            --overlay-ports=/overlay/vcpkg-overlay \
+            --overlay-triplets=/overlay/vcpkg-overlay/triplets \
+            ${PKGS}; \
+    done
 
 # ---------------------------------------------------------------------------
 # Component build
@@ -119,9 +132,12 @@ COPY include /src/include
 COPY src /src/src
 
 # Build-time only changes for the copied sources; the repository is left
-# untouched. The patch adds the core configuration, the JNI_OnLoad entry point
+# untouched. The patch adds the feature levels, the JNI_OnLoad entry point
 # the mobile platform requires and the POSIX clock fix.
 COPY docker/android/patches /patches
+# The patch is written with LF endings while the sources may come from a
+# working tree with CRLF, so the endings are normalized before patching.
+RUN find /src -type f \( -name '*.cpp' -o -name '*.h' -o -name 'CMakeLists.txt' \) -exec sed -i 's/\r$//' {} +
 RUN for p in /patches/*.patch; do patch -p1 -d /src -i "$p"; done
 
 # Optional diagnostics build. It reports the lifecycle of the component to
@@ -136,12 +152,20 @@ ARG BUILD_TYPE=Release
 ARG API_LEVEL=21
 ARG TRIPLET_ARM64=arm64-android21
 ARG TRIPLET_ARM=arm-neon-android21
+ARG FEATURE_LEVEL=schema
 
 # The NDK toolchain is chain-loaded after the vcpkg toolchain: vcpkg resolves
 # the dependencies for the target triplet, the NDK toolchain then provides the
 # cross-compiler. ANDROID_STL=c++_static keeps the C++ runtime inside the .so,
 # so the component does not depend on the runtime of the host application.
-RUN cmake -S /src -B /build/arm64 -G Ninja \
+#
+# avro-cpp headers call fmt::format() but include only <fmt/base.h>. Since
+# fmt 11 that declaration lives in <fmt/format.h>, so it is force included
+# ahead of every translation unit of the "schema" level.
+RUN set -eux; \
+    EXTRA_CXX_FLAGS=""; \
+    if [ "${FEATURE_LEVEL}" = "schema" ]; then EXTRA_CXX_FLAGS="-include fmt/format.h"; fi; \
+    cmake -S /src -B /build/arm64 -G Ninja \
         -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
         -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake \
         -DVCPKG_TARGET_TRIPLET=${TRIPLET_ARM64} \
@@ -150,6 +174,8 @@ RUN cmake -S /src -B /build/arm64 -G Ninja \
         -DANDROID_PLATFORM=android-${API_LEVEL} \
         -DANDROID_NATIVE_API_LEVEL=${API_LEVEL} \
         -DANDROID_STL=c++_static \
+        -DSIMPLEKAFKA_FEATURE_LEVEL=${FEATURE_LEVEL} \
+        -DCMAKE_CXX_FLAGS="-isystem ${VCPKG_ROOT}/installed/${TRIPLET_ARM64}/include ${EXTRA_CXX_FLAGS}" \
     && cmake --build /build/arm64 \
     && cmake -S /src -B /build/arm -G Ninja \
         -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
@@ -160,6 +186,8 @@ RUN cmake -S /src -B /build/arm64 -G Ninja \
         -DANDROID_PLATFORM=android-${API_LEVEL} \
         -DANDROID_NATIVE_API_LEVEL=${API_LEVEL} \
         -DANDROID_STL=c++_static \
+        -DSIMPLEKAFKA_FEATURE_LEVEL=${FEATURE_LEVEL} \
+        -DCMAKE_CXX_FLAGS="-isystem ${VCPKG_ROOT}/installed/${TRIPLET_ARM}/include ${EXTRA_CXX_FLAGS}" \
     && cmake --build /build/arm
 
 # Collect the artifacts and the build provenance next to them.
@@ -172,6 +200,7 @@ RUN mkdir -p /artifact \
         echo "vcpkg commit    : $(cat /opt/vcpkg-commit.txt)"; \
         echo "api level       : ${API_LEVEL}"; \
         echo "build type      : ${BUILD_TYPE}"; \
+        echo "feature level   : ${FEATURE_LEVEL}"; \
         echo "triplet arm64   : ${TRIPLET_ARM64}"; \
         echo "triplet arm     : ${TRIPLET_ARM}"; \
         echo "sha256 arm64    : $(sha256sum /artifact/libSimpleKafka1C_ARM64.so | cut -d' ' -f1)"; \

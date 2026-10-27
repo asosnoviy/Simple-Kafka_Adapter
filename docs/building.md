@@ -119,7 +119,7 @@ Android обязана экспортировать `JNI_OnLoad`. Платфор
 `CMakeLists.txt` — только под Android, потому что `jni.h` есть только в NDK.
 
 Исходники проекта при Android-сборке не меняются: все платформенные правки
-собраны в build-time патч `docker/android/patches/0001-android-core-build.patch`,
+собраны в build-time патч `docker/android/patches/0001-android-build.patch`,
 который применяется к копии исходников внутри контейнера сборки — так же, как
 сделано для Linux-сборки.
 
@@ -127,10 +127,10 @@ Android обязана экспортировать `JNI_OnLoad`. Платфор
 
 Требуется Android NDK и vcpkg. Тулчейн NDK подключается к vcpkg через
 `VCPKG_CHAINLOAD_TOOLCHAIN_FILE`. Перед сборкой нужно применить патч к
-исходникам — он добавляет режим core и точку входа `JNI_OnLoad`:
+исходникам — он добавляет уровни функциональности и точку входа `JNI_OnLoad`:
 
 ```
-patch -p1 -d . -i docker/android/patches/0001-android-core-build.patch
+patch -p1 -d . -i docker/android/patches/0001-android-build.patch
 ```
 
 После этого собирается как обычно:
@@ -145,7 +145,8 @@ cmake -S . -B out/build/arm64 -G Ninja \
     -DANDROID_ABI=arm64-v8a \
     -DANDROID_PLATFORM=android-21 \
     -DANDROID_NATIVE_API_LEVEL=21 \
-    -DANDROID_STL=c++_static
+    -DANDROID_STL=c++_static \
+    -DSIMPLEKAFKA_FEATURE_LEVEL=schema
 cmake --build out/build/arm64
 ```
 
@@ -159,19 +160,24 @@ Android, поддерживаемая мобильной платформой «
 vcpkg разделил Boost на отдельные пакеты, поэтому `boost-algorithm` и
 `boost-property-tree` нужно ставить явно — в составе `boost-json` их нет.
 
-### Ограничения мобильной сборки
+### Уровни функциональности мобильной сборки
 
-Под Android компонента собирается в режиме **core**: без AVRO, Protobuf,
-Schema Registry, TLS и SASL. Причины — эти зависимости не собираются под
-NDK, а в Android нет ни системного OpenSSL, ни cyrus-sasl. Транспорт
-только `plaintext`.
+Под Android компонента собирается в уровне **schema**: Kafka, AVRO, Protobuf и
+Schema Registry. Порт `avro-cpp`, `protobuf` и `curl` под NDK собираются, так
+что методы работы со схемами и Schema Registry доступны.
 
-Режим core включается автоматически при целевой сборке под Android. Для других
-платформ его можно включить принудительно:
+Уровень выбирается ключом `-DSIMPLEKAFKA_FEATURE_LEVEL`:
+
+- `schema` — Kafka, AVRO, Protobuf, Schema Registry (по умолчанию);
+- `kafka` — только Kafka; зависимости схем не нужны и не собираются.
 
 ```
-cmake -S . -B out/build/core -DSIMPLEKAFKA_CORE=ON ...
+cmake -S . -B out/build/kafka -DSIMPLEKAFKA_FEATURE_LEVEL=kafka ...
 ```
+
+TLS и SASL не входят ни в один уровень: в Android нет системного OpenSSL, а
+cyrus-sasl под NDK не собирается. Поэтому Schema Registry работает только по
+`http://`, а транспорт Kafka — только `plaintext`.
 
 
 
